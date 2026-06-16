@@ -1,0 +1,7 @@
+.terraform
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.tfvars.bak*
+.DS_Store
