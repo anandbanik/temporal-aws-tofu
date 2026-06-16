@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM temporalio/admin-tools:1.31.0
+FROM --platform=linux/amd64 temporalio/admin-tools:1.31.0
 
 COPY --chmod=755 ./scripts/ /scripts/
 
