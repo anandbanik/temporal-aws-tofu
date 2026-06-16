@@ -1,6 +1,6 @@
+# syntax=docker/dockerfile:1
 FROM temporalio/admin-tools:1.31.0
 
-COPY ./scripts/ /scripts/
-RUN chmod +x /scripts/setup-postgres.sh
+COPY --chmod=755 ./scripts/ /scripts/
 
 CMD ["/scripts/setup-postgres.sh"]
