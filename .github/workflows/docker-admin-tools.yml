@@ -30,6 +30,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # QEMU is required to emulate arm64 on the default amd64 runner
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -56,6 +62,7 @@ jobs:
         with:
           context: dockerImage/admin-tools
           push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
