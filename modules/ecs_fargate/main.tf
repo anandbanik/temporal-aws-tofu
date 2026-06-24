@@ -73,14 +73,14 @@ resource "aws_cloudwatch_log_group" "server" {
 
   tags = var.tags
 }
-
+/*
 resource "aws_cloudwatch_log_group" "ui" {
   name              = "/ecs/${var.name}/temporal-ui"
   retention_in_days = var.log_retention_in_days
 
   tags = var.tags
 }
-
+*/
 # ---------------------------------------------------------------------------
 # IAM
 # ---------------------------------------------------------------------------
@@ -133,8 +133,8 @@ resource "aws_iam_role" "task" {
 # which also creates the schema and visibility database on first boot)
 # ---------------------------------------------------------------------------
 
-resource "aws_ecs_task_definition" "server" {
-  family                   = "${var.name}-temporal-server"
+resource "aws_ecs_task_definition" "temporal_dbsetup" {
+  family                   = "${var.name}-temporal-dbsetup"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.temporal_server_cpu
@@ -144,8 +144,9 @@ resource "aws_ecs_task_definition" "server" {
 
   container_definitions = jsonencode([
     {
-      name      = "temporal-server"
-      image     = "temporalio/auto-setup:${var.temporal_version}"
+      name      = "temporal-dbsetup"
+      //image     = "temporalio/auto-setup:${var.temporal_version}"
+      image     = "ghcr.io/anandbanik/temporal-aws-tofu/admin-tools:v1.0.2"
       essential = true
 
       portMappings = [
@@ -159,11 +160,13 @@ resource "aws_ecs_task_definition" "server" {
         { name = "DB", value = "postgres12" },
         { name = "DB_PORT", value = tostring(var.db_port) },
         { name = "POSTGRES_SEEDS", value = var.db_host },
+        /*
         { name = "DBNAME", value = var.db_name },
         { name = "VISIBILITY_DBNAME", value = "${var.db_name}_visibility" },
         { name = "ENABLE_ES", value = "false" },
         { name = "SQL_TLS_ENABLED", value = "true" },
         { name = "SQL_HOST_VERIFICATION", value = "false" },
+        */
       ]
 
       secrets = [
@@ -173,6 +176,10 @@ resource "aws_ecs_task_definition" "server" {
         },
         {
           name      = "POSTGRES_PWD"
+          valueFrom = "${var.db_secret_arn}:password::"
+        },
+        {
+          name      = "SQL_PASSWORD"
           valueFrom = "${var.db_secret_arn}:password::"
         },
       ]
@@ -191,6 +198,50 @@ resource "aws_ecs_task_definition" "server" {
   tags = var.tags
 }
 
+#####################
+# Trigger the One-Shot Setup Task
+#####################
+resource "null_resource" "run_temporal_admin" {
+  depends_on = [
+    aws_ecs_task_definition.temporal_dbsetup,
+    //aws_rds_cluster.temporal  # or your RDS resource
+  ]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      TASK_ARN=$(aws ecs run-task \
+        --cluster ${aws_ecs_cluster.this.name} \
+        --launch-type FARGATE \
+        --task-definition ${aws_ecs_task_definition.temporal_dbsetup.family} \
+        --network-configuration "awsvpcConfiguration={subnets=[${var.private_subnet_ids.0}],securityGroups=[${var.ecs_tasks_security_group_id}],assignPublicIp=DISABLED}" \
+        --region ${var.region} \
+        --query 'tasks[0].taskArn' \
+        --output text)
+
+      echo "Waiting for task $TASK_ARN to complete..."
+
+      aws ecs wait tasks-stopped \
+        --cluster ${aws_ecs_cluster.this.name} \
+        --tasks $TASK_ARN \
+        --region ${var.region}
+
+      EXIT_CODE=$(aws ecs describe-tasks \
+        --cluster ${aws_ecs_cluster.this.name} \
+        --tasks $TASK_ARN \
+        --region ${var.region} \
+        --query 'tasks[0].containers[0].exitCode' \
+        --output text)
+
+      echo "Task exited with code: $EXIT_CODE"
+      if [ "$EXIT_CODE" != "0" ]; then
+        echo "Temporal schema setup FAILED"
+        exit 1
+      fi
+    EOT
+  }
+}
+
+/*
 resource "aws_ecs_service" "server" {
   name            = "temporal-server"
   cluster         = aws_ecs_cluster.this.id
@@ -210,7 +261,9 @@ resource "aws_ecs_service" "server" {
 
   tags = var.tags
 }
+*/
 
+/*
 # ---------------------------------------------------------------------------
 # Load balancer for the Temporal Web UI
 # ---------------------------------------------------------------------------
@@ -327,3 +380,4 @@ resource "aws_ecs_service" "ui" {
 
   tags = var.tags
 }
+*/

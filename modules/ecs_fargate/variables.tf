@@ -3,6 +3,11 @@ variable "name" {
   type        = string
 }
 
+variable "region" {
+  description = "AWS region to deploy resources in"
+  type        = string
+}
+
 variable "vpc_id" {
   description = "VPC ID the cluster runs in"
   type        = string

@@ -3,10 +3,12 @@ output "vpc_id" {
   value       = module.vpc.vpc_id
 }
 
+/*
 output "temporal_ui_url" {
   description = "URL of the Temporal Web UI"
   value       = module.temporal.ui_url
 }
+*/
 
 output "temporal_frontend_address" {
   description = "Internal address of the Temporal frontend gRPC endpoint (reachable from within the VPC, e.g. by SDK workers)"
