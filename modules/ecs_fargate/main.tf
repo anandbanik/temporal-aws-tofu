@@ -129,8 +129,7 @@ resource "aws_iam_role" "task" {
 }
 
 # ---------------------------------------------------------------------------
-# Temporal server (runs frontend/history/matching/worker via auto-setup image,
-# which also creates the schema and visibility database on first boot)
+# Temporal Admin Topls (one-shot task to create the schema and visibility database)
 # ---------------------------------------------------------------------------
 
 resource "aws_ecs_task_definition" "temporal_dbsetup" {
@@ -145,7 +144,6 @@ resource "aws_ecs_task_definition" "temporal_dbsetup" {
   container_definitions = jsonencode([
     {
       name      = "temporal-dbsetup"
-      //image     = "temporalio/auto-setup:${var.temporal_version}"
       image     = "ghcr.io/anandbanik/temporal-aws-tofu/admin-tools:v1.0.2"
       essential = true
 
@@ -160,13 +158,6 @@ resource "aws_ecs_task_definition" "temporal_dbsetup" {
         { name = "DB", value = "postgres12" },
         { name = "DB_PORT", value = tostring(var.db_port) },
         { name = "POSTGRES_SEEDS", value = var.db_host },
-        /*
-        { name = "DBNAME", value = var.db_name },
-        { name = "VISIBILITY_DBNAME", value = "${var.db_name}_visibility" },
-        { name = "ENABLE_ES", value = "false" },
-        { name = "SQL_TLS_ENABLED", value = "true" },
-        { name = "SQL_HOST_VERIFICATION", value = "false" },
-        */
       ]
 
       secrets = [
@@ -241,7 +232,78 @@ resource "null_resource" "run_temporal_admin" {
   }
 }
 
-/*
+
+# ---------------------------------------------------------------------------
+# Temporal server (runs frontend/history/matching/worker via auto-setup image,
+# which also creates the schema and visibility database on first boot)
+# ---------------------------------------------------------------------------
+
+resource "aws_ecs_task_definition" "temporal_server" {
+  family                   = "${var.name}-temporal-server"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.temporal_server_cpu
+  memory                   = var.temporal_server_memory
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "temporal-dbsetup"
+      //image     = "temporalio/auto-setup:${var.temporal_version}"
+      image     = "ghcr.io/anandbanik/temporal-aws-tofu/admin-tools:v1.0.2"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = var.frontend_grpc_port
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = [
+        { name = "DB", value = "postgres12" },
+        { name = "DB_PORT", value = tostring(var.db_port) },
+        { name = "POSTGRES_SEEDS", value = var.db_host },
+        /*
+        { name = "DBNAME", value = var.db_name },
+        { name = "VISIBILITY_DBNAME", value = "${var.db_name}_visibility" },
+        { name = "ENABLE_ES", value = "false" },
+        { name = "SQL_TLS_ENABLED", value = "true" },
+        { name = "SQL_HOST_VERIFICATION", value = "false" },
+        */
+      ]
+
+      secrets = [
+        {
+          name      = "POSTGRES_USER"
+          valueFrom = "${var.db_secret_arn}:username::"
+        },
+        {
+          name      = "POSTGRES_PWD"
+          valueFrom = "${var.db_secret_arn}:password::"
+        },
+        {
+          name      = "SQL_PASSWORD"
+          valueFrom = "${var.db_secret_arn}:password::"
+        },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.server.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "temporal-server"
+        }
+      }
+    }
+  ])
+
+  tags = var.tags
+}
+
+
 resource "aws_ecs_service" "server" {
   name            = "temporal-server"
   cluster         = aws_ecs_cluster.this.id
@@ -261,7 +323,7 @@ resource "aws_ecs_service" "server" {
 
   tags = var.tags
 }
-*/
+
 
 /*
 # ---------------------------------------------------------------------------
