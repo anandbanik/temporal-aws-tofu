@@ -73,14 +73,14 @@ resource "aws_cloudwatch_log_group" "server" {
 
   tags = var.tags
 }
-/*
+
 resource "aws_cloudwatch_log_group" "ui" {
   name              = "/ecs/${var.name}/temporal-ui"
   retention_in_days = var.log_retention_in_days
 
   tags = var.tags
 }
-*/
+
 # ---------------------------------------------------------------------------
 # IAM
 # ---------------------------------------------------------------------------
@@ -146,14 +146,14 @@ resource "aws_ecs_task_definition" "temporal_dbsetup" {
       name      = "temporal-dbsetup"
       image     = "ghcr.io/anandbanik/temporal-aws-tofu/admin-tools:v1.0.2"
       essential = true
-
+      /*
       portMappings = [
         {
           containerPort = var.frontend_grpc_port
           protocol      = "tcp"
         }
       ]
-
+      */
       environment = [
         { name = "DB", value = "postgres12" },
         { name = "DB_PORT", value = tostring(var.db_port) },
@@ -249,9 +249,8 @@ resource "aws_ecs_task_definition" "temporal_server" {
 
   container_definitions = jsonencode([
     {
-      name      = "temporal-dbsetup"
-      //image     = "temporalio/auto-setup:${var.temporal_version}"
-      image     = "ghcr.io/anandbanik/temporal-aws-tofu/admin-tools:v1.0.2"
+      name      = "temporal-server"
+      image     = "ghcr.io/anandbanik/temporal-aws-tofu/server:v0.0.1"
       essential = true
 
       portMappings = [
@@ -265,13 +264,12 @@ resource "aws_ecs_task_definition" "temporal_server" {
         { name = "DB", value = "postgres12" },
         { name = "DB_PORT", value = tostring(var.db_port) },
         { name = "POSTGRES_SEEDS", value = var.db_host },
-        /*
         { name = "DBNAME", value = var.db_name },
         { name = "VISIBILITY_DBNAME", value = "${var.db_name}_visibility" },
         { name = "ENABLE_ES", value = "false" },
         { name = "SQL_TLS_ENABLED", value = "true" },
         { name = "SQL_HOST_VERIFICATION", value = "false" },
-        */
+        { name = "DYNAMIC_CONFIG_FILE_PATH", value = "/etc/temporal/dynamicconfig/development-sql.yaml" },
       ]
 
       secrets = [
@@ -307,9 +305,11 @@ resource "aws_ecs_task_definition" "temporal_server" {
 resource "aws_ecs_service" "server" {
   name            = "temporal-server"
   cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.server.arn
+  task_definition = aws_ecs_task_definition.temporal_server.arn
   desired_count   = var.temporal_server_desired_count
   launch_type     = "FARGATE"
+
+  depends_on = [null_resource.run_temporal_admin]
 
   network_configuration {
     subnets          = var.private_subnet_ids
@@ -325,7 +325,7 @@ resource "aws_ecs_service" "server" {
 }
 
 
-/*
+
 # ---------------------------------------------------------------------------
 # Load balancer for the Temporal Web UI
 # ---------------------------------------------------------------------------
@@ -442,4 +442,4 @@ resource "aws_ecs_service" "ui" {
 
   tags = var.tags
 }
-*/
+
