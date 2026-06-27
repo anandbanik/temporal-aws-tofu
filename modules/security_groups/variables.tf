@@ -32,6 +32,17 @@ variable "db_port" {
   default     = 5432
 }
 
+variable "frontend_grpc_port" {
+  description = "Port the Temporal frontend gRPC service listens on"
+  type        = number
+  default     = 7233
+}
+
+variable "nlb_ingress_cidrs" {
+  description = "CIDR blocks allowed to reach the internet-facing Temporal frontend NLB"
+  type        = list(string)
+}
+
 variable "tags" {
   description = "Tags applied to all resources"
   type        = map(string)

@@ -46,6 +46,12 @@ variable "alb_ingress_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "frontend_nlb_ingress_cidrs" {
+  description = "CIDR blocks allowed to reach the internet-facing Temporal frontend NLB. Defaults to 0.0.0.0/0; the frontend gRPC port has no auth/mTLS in front of it, so restrict this in production (e.g. to known worker/client egress CIDRs)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "db_instance_class" {
   description = "RDS instance class for the Postgres database"
   type        = string

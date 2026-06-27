@@ -19,3 +19,13 @@ output "frontend_address" {
   description = "Internal DNS address of the Temporal frontend gRPC endpoint, reachable from within the VPC (e.g. by workers)"
   value       = local.frontend_address
 }
+
+output "frontend_nlb_dns_name" {
+  description = "DNS name of the NLB fronting the Temporal frontend gRPC endpoint"
+  value       = aws_lb.frontend.dns_name
+}
+
+output "frontend_nlb_address" {
+  description = "Address (host:port) of the Temporal frontend NLB, for clients that can't resolve the Cloud Map private DNS namespace"
+  value       = "${aws_lb.frontend.dns_name}:${var.frontend_grpc_port}"
+}

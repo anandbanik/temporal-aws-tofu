@@ -306,7 +306,7 @@ resource "aws_ecs_service" "server" {
   desired_count   = var.temporal_server_desired_count
   launch_type     = "FARGATE"
 
-  depends_on = [null_resource.run_temporal_admin]
+  depends_on = [null_resource.run_temporal_admin, aws_lb_listener.frontend]
 
   network_configuration {
     subnets          = var.private_subnet_ids
@@ -318,7 +318,63 @@ resource "aws_ecs_service" "server" {
     registry_arn = aws_service_discovery_service.frontend.arn
   }
 
+  load_balancer {
+    target_group_arn = aws_lb_target_group.frontend.arn
+    container_name   = "temporal-server"
+    container_port   = var.frontend_grpc_port
+  }
+
   tags = var.tags
+}
+
+# ---------------------------------------------------------------------------
+# Internet-facing NLB for the Temporal frontend gRPC endpoint. Cloud Map (above)
+# lets tasks in this VPC resolve the frontend directly; the NLB gives a stable,
+# health-checked endpoint for clients outside the VPC, including over the
+# public internet. Access is controlled by the nlb security group's ingress
+# CIDRs, not network placement.
+# ---------------------------------------------------------------------------
+
+resource "aws_lb" "frontend" {
+  name_prefix                      = "fe-"
+  internal                         = false
+  load_balancer_type               = "network"
+  security_groups                  = [var.nlb_security_group_id]
+  subnets                          = var.public_subnet_ids
+  enable_cross_zone_load_balancing = true
+
+  tags = merge(var.tags, { Name = "${var.name}-frontend-nlb" })
+}
+
+resource "aws_lb_target_group" "frontend" {
+  name_prefix = "fe-"
+  port        = var.frontend_grpc_port
+  protocol    = "TCP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    protocol            = "TCP"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = var.tags
+}
+
+resource "aws_lb_listener" "frontend" {
+  load_balancer_arn = aws_lb.frontend.arn
+  port              = var.frontend_grpc_port
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.frontend.arn
+  }
 }
 
 

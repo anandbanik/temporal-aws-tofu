@@ -31,6 +31,11 @@ variable "ecs_tasks_security_group_id" {
   type = string
 }
 
+variable "nlb_security_group_id" {
+  description = "ID of the security group attached to the Temporal frontend NLB"
+  type        = string
+}
+
 variable "alb_port" {
   description = "Port the load balancer listens on for the Temporal Web UI"
   type        = number

@@ -24,6 +24,7 @@ module "security_groups" {
   name              = var.name
   vpc_id            = module.vpc.vpc_id
   alb_ingress_cidrs = var.alb_ingress_cidrs
+  nlb_ingress_cidrs = var.frontend_nlb_ingress_cidrs
   tags              = var.tags
 }
 
@@ -41,7 +42,7 @@ module "postgres" {
 }
 
 module "temporal" {
-  source = "./modules/ecs_fargate"
+  source                      = "./modules/ecs_fargate"
   name                        = var.name
   region                      = var.aws_region
   vpc_id                      = module.vpc.vpc_id
@@ -49,6 +50,7 @@ module "temporal" {
   private_subnet_ids          = module.vpc.private_subnet_ids
   alb_security_group_id       = module.security_groups.alb_security_group_id
   ecs_tasks_security_group_id = module.security_groups.ecs_tasks_security_group_id
+  nlb_security_group_id       = module.security_groups.nlb_security_group_id
 
   temporal_version    = var.temporal_version
   temporal_ui_version = var.temporal_ui_version
