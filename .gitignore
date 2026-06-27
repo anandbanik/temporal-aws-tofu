@@ -5,3 +5,6 @@
 *.tfvars
 *.tfvars.bak*
 .DS_Store
+plan*
+plan.json
+.claude/settings.local.json

@@ -180,7 +180,7 @@ resource "aws_ecs_task_definition" "temporal_dbsetup" {
         options = {
           "awslogs-group"         = aws_cloudwatch_log_group.server.name
           "awslogs-region"        = data.aws_region.current.name
-          "awslogs-stream-prefix" = "temporal-server"
+          "awslogs-stream-prefix" = "temporal-dbsetup"
         }
       }
     }
@@ -250,7 +250,7 @@ resource "aws_ecs_task_definition" "temporal_server" {
   container_definitions = jsonencode([
     {
       name      = "temporal-server"
-      image     = "ghcr.io/anandbanik/temporal-aws-tofu/server:v0.0.1"
+      image     = "ghcr.io/anandbanik/temporal-aws-tofu/server:v0.0.2"
       essential = true
 
       portMappings = [
@@ -270,6 +270,7 @@ resource "aws_ecs_task_definition" "temporal_server" {
         { name = "SQL_TLS_ENABLED", value = "true" },
         { name = "SQL_HOST_VERIFICATION", value = "false" },
         { name = "DYNAMIC_CONFIG_FILE_PATH", value = "/etc/temporal/dynamicconfig/development-sql.yaml" },
+        { name = "BIND_ON_IP", value = "0.0.0.0" },
       ]
 
       secrets = [
@@ -279,10 +280,6 @@ resource "aws_ecs_task_definition" "temporal_server" {
         },
         {
           name      = "POSTGRES_PWD"
-          valueFrom = "${var.db_secret_arn}:password::"
-        },
-        {
-          name      = "SQL_PASSWORD"
           valueFrom = "${var.db_secret_arn}:password::"
         },
       ]

@@ -1,0 +1,7 @@
+name                = "temporal"
+subnet_ids          = ["subnet-0735c7b3ec792779b", "subnet-09b9394d71bd2a557"]
+security_group_ids  = ["sg-06da13f8119593794"]
+tags = {
+  Environment = "dev"
+  Project     = "temporal"
+}

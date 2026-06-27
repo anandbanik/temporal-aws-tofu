@@ -1,0 +1,6 @@
+name                 = "temporal"
+vpc_id               = "vpc-02c0c2fba7fd76465"
+tags = {
+  Environment = "dev"
+  Project     = "temporal"
+}
