@@ -57,10 +57,12 @@ resource "aws_service_discovery_service" "frontend" {
 
     routing_policy = "MULTIVALUE"
   }
-
+  # Always resolved to one by default (https://github.com/hashicorp/terraform-provider-aws/issues/44285)
+  /*
   health_check_custom_config {
     failure_threshold = 1
   }
+  */
 }
 
 # ---------------------------------------------------------------------------
@@ -77,6 +79,27 @@ resource "aws_cloudwatch_log_group" "dbsetup" {
 
 resource "aws_cloudwatch_log_group" "frontend" {
   name              = "/ecs/${var.name}/temporal-frontend"
+  retention_in_days = var.log_retention_in_days
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "matching" {
+  name              = "/ecs/${var.name}/temporal-matching"
+  retention_in_days = var.log_retention_in_days
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "history" {
+  name              = "/ecs/${var.name}/temporal-history"
+  retention_in_days = var.log_retention_in_days
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "worker" {
+  name              = "/ecs/${var.name}/temporal-worker"
   retention_in_days = var.log_retention_in_days
 
   tags = var.tags
@@ -245,7 +268,7 @@ resource "null_resource" "run_temporal_admin" {
 # Temporal server (runs frontend/history/matching/worker via auto-setup image,
 # which also creates the schema and visibility database on first boot)
 # ---------------------------------------------------------------------------
-
+# Frontend Service
 resource "aws_ecs_task_definition" "temporal-frontend" {
   family                   = "${var.name}-temporal-frontend"
   requires_compatibilities = ["FARGATE"]
@@ -279,6 +302,8 @@ resource "aws_ecs_task_definition" "temporal-frontend" {
         { name = "SQL_HOST_VERIFICATION", value = "false" },
         { name = "DYNAMIC_CONFIG_FILE_PATH", value = "/etc/temporal/dynamicconfig/development-sql.yaml" },
         { name = "BIND_ON_IP", value = "0.0.0.0" },
+        { name = "SERVICES", value = "frontend"},
+        { name = "TEMPORAL_ADDRESS", value = local.frontend_address},
       ]
 
       secrets = [
@@ -330,6 +355,254 @@ resource "aws_ecs_service" "frontend" {
     target_group_arn = aws_lb_target_group.frontend.arn
     container_name   = "temporal-frontend"
     container_port   = var.frontend_grpc_port
+  }
+
+  tags = var.tags
+}
+
+
+# Matching Service
+resource "aws_ecs_task_definition" "temporal-matching" {
+  family                   = "${var.name}-temporal-matching"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.temporal_server_cpu
+  memory                   = var.temporal_server_memory
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "temporal-matching"
+      image     = "ghcr.io/anandbanik/temporal-aws-tofu/server:v0.0.2"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = var.frontend_grpc_port
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = [
+        { name = "DB", value = "postgres12" },
+        { name = "DB_PORT", value = tostring(var.db_port) },
+        { name = "POSTGRES_SEEDS", value = var.db_host },
+        { name = "DBNAME", value = var.db_name },
+        { name = "VISIBILITY_DBNAME", value = "${var.db_name}_visibility" },
+        { name = "ENABLE_ES", value = "false" },
+        { name = "SQL_TLS_ENABLED", value = "true" },
+        { name = "SQL_HOST_VERIFICATION", value = "false" },
+        { name = "DYNAMIC_CONFIG_FILE_PATH", value = "/etc/temporal/dynamicconfig/development-sql.yaml" },
+        { name = "BIND_ON_IP", value = "0.0.0.0" },
+        { name = "SERVICES", value = "matching"},
+        { name = "TEMPORAL_ADDRESS", value = local.frontend_address},
+      ]
+
+      secrets = [
+        {
+          name      = "POSTGRES_USER"
+          valueFrom = "${var.db_secret_arn}:username::"
+        },
+        {
+          name      = "POSTGRES_PWD"
+          valueFrom = "${var.db_secret_arn}:password::"
+        },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.matching.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "temporal-matching"
+        }
+      }
+    }
+  ])
+
+  tags = var.tags
+}
+
+
+resource "aws_ecs_service" "matching" {
+  name            = "temporal-matching"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.temporal-matching.arn
+  desired_count   = var.temporal_server_desired_count
+  launch_type     = "FARGATE"
+
+  depends_on = [null_resource.run_temporal_admin, aws_ecs_service.frontend]
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.ecs_tasks_security_group_id]
+    assign_public_ip = false
+  }
+
+  tags = var.tags
+}
+
+# History Service
+resource "aws_ecs_task_definition" "temporal-history" {
+  family                   = "${var.name}-temporal-history"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.temporal_server_cpu
+  memory                   = var.temporal_server_memory
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "temporal-history"
+      image     = "ghcr.io/anandbanik/temporal-aws-tofu/server:v0.0.2"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = var.frontend_grpc_port
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = [
+        { name = "DB", value = "postgres12" },
+        { name = "DB_PORT", value = tostring(var.db_port) },
+        { name = "POSTGRES_SEEDS", value = var.db_host },
+        { name = "DBNAME", value = var.db_name },
+        { name = "VISIBILITY_DBNAME", value = "${var.db_name}_visibility" },
+        { name = "ENABLE_ES", value = "false" },
+        { name = "SQL_TLS_ENABLED", value = "true" },
+        { name = "SQL_HOST_VERIFICATION", value = "false" },
+        { name = "DYNAMIC_CONFIG_FILE_PATH", value = "/etc/temporal/dynamicconfig/development-sql.yaml" },
+        { name = "BIND_ON_IP", value = "0.0.0.0" },
+        { name = "SERVICES", value = "history"},
+        { name = "TEMPORAL_ADDRESS", value = local.frontend_address},
+      ]
+
+      secrets = [
+        {
+          name      = "POSTGRES_USER"
+          valueFrom = "${var.db_secret_arn}:username::"
+        },
+        {
+          name      = "POSTGRES_PWD"
+          valueFrom = "${var.db_secret_arn}:password::"
+        },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.history.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "temporal-history"
+        }
+      }
+    }
+  ])
+
+  tags = var.tags
+}
+
+
+resource "aws_ecs_service" "history" {
+  name            = "temporal-history"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.temporal-history.arn
+  desired_count   = var.temporal_server_desired_count
+  launch_type     = "FARGATE"
+
+  depends_on = [null_resource.run_temporal_admin, aws_ecs_service.frontend]
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.ecs_tasks_security_group_id]
+    assign_public_ip = false
+  }
+
+  tags = var.tags
+}
+
+# Worker Service
+resource "aws_ecs_task_definition" "temporal-worker" {
+  family                   = "${var.name}-temporal-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.temporal_server_cpu
+  memory                   = var.temporal_server_memory
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "temporal-worker"
+      image     = "ghcr.io/anandbanik/temporal-aws-tofu/server:v0.0.2"
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = var.frontend_grpc_port
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = [
+        { name = "DB", value = "postgres12" },
+        { name = "DB_PORT", value = tostring(var.db_port) },
+        { name = "POSTGRES_SEEDS", value = var.db_host },
+        { name = "DBNAME", value = var.db_name },
+        { name = "VISIBILITY_DBNAME", value = "${var.db_name}_visibility" },
+        { name = "ENABLE_ES", value = "false" },
+        { name = "SQL_TLS_ENABLED", value = "true" },
+        { name = "SQL_HOST_VERIFICATION", value = "false" },
+        { name = "DYNAMIC_CONFIG_FILE_PATH", value = "/etc/temporal/dynamicconfig/development-sql.yaml" },
+        { name = "BIND_ON_IP", value = "0.0.0.0" },
+        { name = "SERVICES", value = "worker"},
+        { name = "TEMPORAL_ADDRESS", value = local.frontend_address},
+        { name = "PUBLIC_FRONTEND_ADDRESS", value = local.frontend_address},
+      ]
+
+      secrets = [
+        {
+          name      = "POSTGRES_USER"
+          valueFrom = "${var.db_secret_arn}:username::"
+        },
+        {
+          name      = "POSTGRES_PWD"
+          valueFrom = "${var.db_secret_arn}:password::"
+        },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.worker.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "temporal-worker"
+        }
+      }
+    }
+  ])
+
+  tags = var.tags
+}
+
+
+resource "aws_ecs_service" "worker" {
+  name            = "temporal-worker"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.temporal-worker.arn
+  desired_count   = var.temporal_server_desired_count
+  launch_type     = "FARGATE"
+
+  depends_on = [null_resource.run_temporal_admin, aws_ecs_service.frontend]
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.ecs_tasks_security_group_id]
+    assign_public_ip = false
   }
 
   tags = var.tags
