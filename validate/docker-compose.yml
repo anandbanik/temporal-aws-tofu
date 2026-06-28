@@ -1,0 +1,28 @@
+services:
+  utility-api:
+    image: ghcr.io/anandbanik/temporal-failover-utility:0.0.2
+    container_name: utility-api
+    environment:
+      - SERVER_PORT=9090
+      - TEMPORAL_HOST_PORT=${TEMPORAL_FRONTEND_ADDRESS}
+    ports:
+      - 9090:9090
+    networks:
+      - temporal-network
+
+  money-transfer-worker:
+    build:
+      context: ./money-transfer-worker
+      dockerfile: Dockerfile
+    container_name: money-transfer-worker
+    environment:
+      - SPRING_TEMPORAL_CONNECTION_TARGET=${TEMPORAL_FRONTEND_ADDRESS}
+    ports:
+      - 8080:8080
+    networks:
+      - temporal-network
+
+networks:
+  temporal-network:
+    driver: bridge
+    name: temporal-network

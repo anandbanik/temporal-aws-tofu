@@ -9,3 +9,7 @@ plan.json
 .terraform.tfstate.lock.info
 .claude
 .claude/settings.local.json
+.settings
+.classpath
+.project
+target

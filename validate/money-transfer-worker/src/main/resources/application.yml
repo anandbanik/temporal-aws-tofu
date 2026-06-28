@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: money-tranfer-worker
+  temporal:
+    namespace: default
+    connection:
+      target: 127.0.0.1:7233
+    workers:
+      - name: money-transfer
+        task-queue: MONEY_TRANSFER_TASK_QUEUE
+    workersAutoDiscovery:
+      packages:
+        - com.temporal.money.transfer.activity
+        - com.temporal.money.transfer.workflow

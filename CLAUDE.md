@@ -10,18 +10,19 @@ cluster to AWS Fargate, plus the two custom Docker images it runs. There is no a
 
 ## Commands
 
-Terraform (run from repo root, `temporal-aws-tofu/`):
+OpenTofu (run from repo root, `temporal-aws-tofu/`):
 
 ```bash
-cp terraform.tfvars.example terraform.tfvars   # first-time setup; edit alb_ingress_cidrs at minimum
-terraform init
-terraform validate
-terraform plan
-terraform apply
-terraform fmt -recursive                       # format before committing
+# first-time setup: create terraform.tfvars and set at minimum alb_ingress_cidrs and
+# frontend_nlb_ingress_cidrs (both default to 0.0.0.0/0 — see "Things to watch for" below)
+tofu init
+tofu validate
+tofu plan
+tofu apply
+tofu fmt -recursive                       # format before committing
 ```
 
-There are no unit tests; correctness is checked via `terraform validate`/`plan` and by applying to a
+There are no unit tests; correctness is checked via `tofu validate`/`plan` and by applying to a
 real AWS account.
 
 Docker images (`dockerImage/server` and `dockerImage/admin-tools`) are built and pushed by GitHub
@@ -59,16 +60,18 @@ explicitly as module inputs/outputs.
   1. **`temporal-dbsetup`** — a one-shot Fargate task (`admin-tools` image) that creates the `temporal`
      and `temporal_visibility` databases/schemas. It's launched imperatively via a `null_resource`
      `local-exec` provisioner that shells out to `aws ecs run-task` + `aws ecs wait tasks-stopped`
-     (this requires the AWS CLI on the machine running `terraform apply`, with credentials and
+     (this requires the AWS CLI on the machine running `tofu apply`, with credentials and
      permissions beyond what the Terraform AWS provider itself needs). `aws_ecs_service.server`
      depends on this resource so the schema exists before the server starts.
   2. **`temporal-server`** (`server` image, wraps `temporalio/server`) — runs all Temporal services.
-     Registered two ways for frontend gRPC access, both internal-only (no public IP):
-     - a private Cloud Map DNS namespace (`<name>.local`) as `temporal-frontend`, for clients that can
-       resolve private DNS in this VPC (e.g. the UI task).
-     - an internal NLB (`aws_lb.frontend`, TCP/`frontend_grpc_port`, target type `ip`) for clients that
-       can't use Cloud Map — peered VPCs, VPN/Direct Connect. Ingress is restricted by the `nlb`
-       security group to `frontend_nlb_ingress_cidrs` (defaults to the VPC CIDR only).
+     Registered two ways for frontend gRPC access:
+     - a private Cloud Map DNS namespace (`<name>.local`) as `temporal-frontend`, internal-only, for
+       clients that can resolve private DNS in this VPC (e.g. the UI task).
+     - `aws_lb.frontend` (TCP/`frontend_grpc_port`, target type `ip`), for clients that can't use Cloud
+       Map. **This NLB is internet-facing** (`internal = false`, deployed in the public subnets), not
+       internal — ingress is restricted by the `nlb` security group to `frontend_nlb_ingress_cidrs`,
+       but that variable defaults to `0.0.0.0/0` and the gRPC port has no auth/mTLS in front of it.
+       Treat tightening this CIDR as a prerequisite for any non-throwaway deployment.
   3. **`temporal-ui`** (upstream `temporalio/ui` image) — sits behind an internet-facing ALB
      (UI port only, default `8080`); reaches the server over the same internal Cloud Map DNS name.
   Both task definitions share one IAM execution role (scoped to `secretsmanager:GetSecretValue` on
@@ -82,14 +85,15 @@ explicitly as module inputs/outputs.
   `scripts/setup-postgres.sh` runs `temporal-sql-tool` to create+migrate the `temporal` and
   `temporal_visibility` databases over TLS, then exits (used only by the one-shot dbsetup task).
 
-After `terraform apply`, the important outputs are `temporal_ui_url`, `temporal_frontend_address`
+After `tofu apply`, the important outputs are `temporal_ui_url`, `temporal_frontend_address`
 (Cloud Map `host:7233`, for workers that can resolve VPC private DNS),
 `temporal_frontend_nlb_address` (NLB `host:7233`, for workers that can't), and `database_secret_arn`.
 
 ## Things to watch for when changing this repo
 
-- `alb_ingress_cidrs` defaults to `0.0.0.0/0` — don't widen this further; if anything, prompt for
-  restricting it.
+- `alb_ingress_cidrs` and `frontend_nlb_ingress_cidrs` both default to `0.0.0.0/0` — don't widen
+  either further; if anything, prompt for restricting them. The NLB one matters more: it fronts the
+  internet-facing frontend gRPC port, which has no auth/mTLS of its own.
 - The Postgres password is intentionally never a Terraform output or container env var in plaintext —
   preserve the Secrets Manager indirection if you touch `modules/postgres` or the task definitions'
   `secrets` blocks.
@@ -97,5 +101,5 @@ After `terraform apply`, the important outputs are `temporal_ui_url`, `temporal_
   manually and are *not* auto-updated by the GitHub Actions workflows — bump them deliberately after a
   new image tag is pushed.
 - `aws_ecs_service.server` and the `null_resource.run_temporal_admin` provisioner depend on the AWS CLI
-  being available and authenticated wherever `terraform apply` runs (not just the Terraform AWS
+  being available and authenticated wherever `tofu apply` runs (not just the Terraform AWS
   provider credentials).
