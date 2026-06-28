@@ -67,8 +67,16 @@ resource "aws_service_discovery_service" "frontend" {
 # Logging
 # ---------------------------------------------------------------------------
 
-resource "aws_cloudwatch_log_group" "server" {
-  name              = "/ecs/${var.name}/temporal-server"
+
+resource "aws_cloudwatch_log_group" "dbsetup" {
+  name              = "/ecs/${var.name}/temporal-dbsetup"
+  retention_in_days = var.log_retention_in_days
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "frontend" {
+  name              = "/ecs/${var.name}/temporal-frontend"
   retention_in_days = var.log_retention_in_days
 
   tags = var.tags
@@ -132,7 +140,7 @@ resource "aws_iam_role" "task" {
 # Temporal Admin Topls (one-shot task to create the schema and visibility database)
 # ---------------------------------------------------------------------------
 
-resource "aws_ecs_task_definition" "temporal_dbsetup" {
+resource "aws_ecs_task_definition" "temporal-dbsetup" {
   family                   = "${var.name}-temporal-dbsetup"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
@@ -178,7 +186,7 @@ resource "aws_ecs_task_definition" "temporal_dbsetup" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.server.name
+          "awslogs-group"         = aws_cloudwatch_log_group.dbsetup.name
           "awslogs-region"        = data.aws_region.current.name
           "awslogs-stream-prefix" = "temporal-dbsetup"
         }
@@ -194,7 +202,7 @@ resource "aws_ecs_task_definition" "temporal_dbsetup" {
 #####################
 resource "null_resource" "run_temporal_admin" {
   depends_on = [
-    aws_ecs_task_definition.temporal_dbsetup,
+    aws_ecs_task_definition.temporal-dbsetup,
     //aws_rds_cluster.temporal  # or your RDS resource
   ]
 
@@ -203,7 +211,7 @@ resource "null_resource" "run_temporal_admin" {
       TASK_ARN=$(aws ecs run-task \
         --cluster ${aws_ecs_cluster.this.name} \
         --launch-type FARGATE \
-        --task-definition ${aws_ecs_task_definition.temporal_dbsetup.family} \
+        --task-definition ${aws_ecs_task_definition.temporal-dbsetup.family} \
         --network-configuration "awsvpcConfiguration={subnets=[${var.private_subnet_ids.0}],securityGroups=[${var.ecs_tasks_security_group_id}],assignPublicIp=DISABLED}" \
         --region ${var.region} \
         --query 'tasks[0].taskArn' \
@@ -238,8 +246,8 @@ resource "null_resource" "run_temporal_admin" {
 # which also creates the schema and visibility database on first boot)
 # ---------------------------------------------------------------------------
 
-resource "aws_ecs_task_definition" "temporal_server" {
-  family                   = "${var.name}-temporal-server"
+resource "aws_ecs_task_definition" "temporal-frontend" {
+  family                   = "${var.name}-temporal-frontend"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = var.temporal_server_cpu
@@ -249,7 +257,7 @@ resource "aws_ecs_task_definition" "temporal_server" {
 
   container_definitions = jsonencode([
     {
-      name      = "temporal-server"
+      name      = "temporal-frontend"
       image     = "ghcr.io/anandbanik/temporal-aws-tofu/server:v0.0.2"
       essential = true
 
@@ -287,9 +295,9 @@ resource "aws_ecs_task_definition" "temporal_server" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.server.name
+          "awslogs-group"         = aws_cloudwatch_log_group.frontend.name
           "awslogs-region"        = data.aws_region.current.name
-          "awslogs-stream-prefix" = "temporal-server"
+          "awslogs-stream-prefix" = "temporal-frontend"
         }
       }
     }
@@ -299,10 +307,10 @@ resource "aws_ecs_task_definition" "temporal_server" {
 }
 
 
-resource "aws_ecs_service" "server" {
-  name            = "temporal-server"
+resource "aws_ecs_service" "frontend" {
+  name            = "temporal-frontend"
   cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.temporal_server.arn
+  task_definition = aws_ecs_task_definition.temporal-frontend.arn
   desired_count   = var.temporal_server_desired_count
   launch_type     = "FARGATE"
 
@@ -320,7 +328,7 @@ resource "aws_ecs_service" "server" {
 
   load_balancer {
     target_group_arn = aws_lb_target_group.frontend.arn
-    container_name   = "temporal-server"
+    container_name   = "temporal-frontend"
     container_port   = var.frontend_grpc_port
   }
 
@@ -491,7 +499,7 @@ resource "aws_ecs_service" "ui" {
     container_port   = var.ui_container_port
   }
 
-  depends_on = [aws_lb_listener.http, aws_ecs_service.server]
+  depends_on = [aws_lb_listener.http, aws_ecs_service.frontend]
 
   tags = var.tags
 }

@@ -1,9 +1,0 @@
-aws_region = "us-east-1"
-name       = "temporal"
-
-# Restrict this to your office/VPN CIDR in production instead of the open internet
-alb_ingress_cidrs = ["203.0.113.0/24"]
-
-# db_instance_class = "db.t4g.medium"
-# temporal_version    = "1.24.2"
-# temporal_ui_version = "2.31.2"
